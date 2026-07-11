@@ -1,0 +1,307 @@
+//! Integration tests for the `schematter` binary: exit codes, text/JSON output,
+//! stdin input, and the schema/IO error path. Cargo builds the binary and hands
+//! us its path in `CARGO_BIN_EXE_schematter`.
+
+use std::io::Write;
+use std::process::{Command, Output, Stdio};
+
+use indoc::indoc;
+use tempfile::TempDir;
+
+const BIN: &str = env!("CARGO_BIN_EXE_schematter");
+
+const SCHEMA: &str = indoc! {"
+    sections:
+      - header: { const: Summary }
+        description: open with a summary
+      - header: { const: Tasks }
+    additionalSections: false
+"};
+
+struct Case {
+    _dir: TempDir,
+    schema: String,
+    markdown: String,
+}
+
+fn case(schema: &str, markdown: &str) -> Case {
+    let dir = TempDir::new().unwrap();
+    let schema_path = dir.path().join("note.yaml");
+    let markdown_path = dir.path().join("note.md");
+    std::fs::write(&schema_path, schema).unwrap();
+    std::fs::write(&markdown_path, markdown).unwrap();
+    Case {
+        _dir: dir,
+        schema: schema_path.to_str().unwrap().to_string(),
+        markdown: markdown_path.to_str().unwrap().to_string(),
+    }
+}
+
+fn run(args: &[&str]) -> Output {
+    Command::new(BIN)
+        .args(args)
+        .output()
+        .expect("run schematter")
+}
+
+fn stdout(output: &Output) -> String {
+    String::from_utf8(output.stdout.clone()).unwrap()
+}
+
+fn stderr(output: &Output) -> String {
+    String::from_utf8(output.stderr.clone()).unwrap()
+}
+
+#[test]
+fn clean_document_exits_zero_and_is_silent() {
+    let case = case(
+        SCHEMA,
+        indoc! {"
+        # Summary
+
+        text
+
+        # Tasks
+    "},
+    );
+    let output = run(&["validate", &case.markdown, "--schema", &case.schema]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(stderr(&output), "");
+}
+
+#[test]
+fn violations_exit_one_with_text_report() {
+    let case = case(
+        SCHEMA,
+        indoc! {"
+        # Summary
+
+        # Extra
+    "},
+    );
+    let output = run(&["validate", &case.markdown, "--schema", &case.schema]);
+    assert_eq!(output.status.code(), Some(1));
+    let expected = indoc! {"
+        note: required section \"Tasks\" is missing
+        note › Extra: unexpected section
+    "};
+    assert_eq!(stdout(&output), expected);
+}
+
+#[test]
+fn hint_line_follows_its_violation() {
+    let case = case(SCHEMA, "# Tasks\n");
+    let output = run(&["validate", &case.markdown, "--schema", &case.schema]);
+    assert_eq!(output.status.code(), Some(1));
+    // `Tasks` binds the second entry; `Summary` is missing and carries a hint.
+    let out = stdout(&output);
+    assert!(out.contains(indoc! {"
+        note: required section \"Summary\" is missing
+          hint: open with a summary
+    "}));
+}
+
+#[test]
+fn json_output_is_an_array_of_reports() {
+    let case = case(
+        SCHEMA,
+        indoc! {"
+        # Summary
+
+        # Extra
+    "},
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(
+        parsed,
+        serde_json::json!([
+            {
+                "key": "note",
+                "schema": "note",
+                "violations": [
+                    {
+                        "breadcrumb": [],
+                        "message": "required section \"Tasks\" is missing",
+                        "hint": null,
+                        "schemaPath": "/sections/1/minContains",
+                        "keyword": "minContains"
+                    },
+                    {
+                        "breadcrumb": ["Extra"],
+                        "message": "unexpected section",
+                        "hint": null,
+                        "schemaPath": "/additionalSections",
+                        "keyword": "additionalSections"
+                    }
+                ]
+            }
+        ])
+    );
+}
+
+#[test]
+fn clean_json_output_is_an_empty_array() {
+    let case = case(
+        SCHEMA,
+        indoc! {"
+        # Summary
+
+        # Tasks
+    "},
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "-f",
+        "json",
+    ]);
+    assert_eq!(output.status.code(), Some(0));
+    let parsed: serde_json::Value = serde_json::from_str(&stdout(&output)).unwrap();
+    assert_eq!(parsed, serde_json::json!([]));
+}
+
+#[test]
+fn markdown_is_read_from_stdin_when_no_path_is_given() {
+    let case = case(SCHEMA, "");
+    let mut child = Command::new(BIN)
+        .args(["validate", "--schema", &case.schema])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(indoc! {b"
+            # Summary
+
+            # Extra
+        "})
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    // Key falls back to `<stdin>`.
+    assert!(stdout(&output).starts_with("<stdin>: required section \"Tasks\" is missing"));
+}
+
+#[test]
+fn invalid_schema_exits_two_via_stderr() {
+    let case = case(
+        indoc! {"
+        sections:
+          - minContains: -1
+    "},
+        "# Summary\n",
+    );
+    let output = run(&["validate", &case.markdown, "--schema", &case.schema]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout(&output), "");
+    assert_eq!(
+        stderr(&output),
+        "schema 'note' /sections/0/minContains: minContains must not be negative\n"
+    );
+}
+
+#[test]
+fn missing_schema_file_exits_two() {
+    let case = case(SCHEMA, "# Summary\n");
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        "does-not-exist.yaml",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(stderr(&output).contains("reading schema does-not-exist.yaml"));
+}
+
+#[test]
+fn multiple_files_report_under_their_own_keys() {
+    let dir = TempDir::new().unwrap();
+    let schema_path = dir.path().join("note.yaml");
+    let clean_path = dir.path().join("clean.md");
+    let broken_path = dir.path().join("broken.md");
+    std::fs::write(&schema_path, SCHEMA).unwrap();
+    std::fs::write(
+        &clean_path,
+        indoc! {"
+        # Summary
+
+        # Tasks
+    "},
+    )
+    .unwrap();
+    std::fs::write(
+        &broken_path,
+        indoc! {"
+        # Summary
+
+        # Extra
+    "},
+    )
+    .unwrap();
+
+    let output = run(&[
+        "validate",
+        clean_path.to_str().unwrap(),
+        broken_path.to_str().unwrap(),
+        "--schema",
+        schema_path.to_str().unwrap(),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    let expected = indoc! {"
+        broken: required section \"Tasks\" is missing
+        broken › Extra: unexpected section
+    "};
+    assert_eq!(stdout(&output), expected);
+}
+
+#[test]
+fn explain_prints_binding_trace_and_exits_zero() {
+    let case = case(
+        SCHEMA,
+        indoc! {"
+        # Summary
+
+        # Extra
+    "},
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "--explain",
+    ]);
+    assert_eq!(output.status.code(), Some(0));
+    let expected = indoc! {"
+        note  [schema: note]
+        # Summary  ->  sections[0]
+        # Extra  ->  additional
+
+    "};
+    assert_eq!(stdout(&output), expected);
+}
+
+#[test]
+fn unparseable_schema_yaml_exits_two_without_pointer() {
+    let case = case("sections: [\n", "# Summary\n");
+    let output = run(&["validate", &case.markdown, "--schema", &case.schema]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(stdout(&output), "");
+    assert!(stderr(&output).starts_with("schema 'note': "));
+}

@@ -1,0 +1,367 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://document-schema.org/draft/2026-06/schema",
+  "title": "schematter document schema",
+  "description": "Meta-schema for the schematter document-schema dialect (draft 2026-06). A document schema declares the required shape of a markdown page: its frontmatter (validated as JSON Schema draft 2020-12), the sections it contains and in what order, how headers are written, how deep the heading tree may nest, and how large each part may grow. This meta-schema validates such a schema file; it does not validate markdown documents.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "const": "https://document-schema.org/draft/2026-06/schema",
+      "description": "The dialect this schema is written in. Optional; when present it must name this dialect."
+    },
+    "description": {
+      "$ref": "#/$defs/scalarText",
+      "description": "Human-readable note attached to the whole document. The nearest description is reported as the hint on every violation, so it documents the convention it enforces."
+    },
+    "frontmatter": {
+      "$ref": "https://json-schema.org/draft/2020-12/schema",
+      "$comment": "Literal JSON Schema (draft 2020-12), applied to the page's YAML frontmatter with format assertions enabled. schematter additionally forbids external `$ref` (only same-document `#`-fragments are allowed) and hides frontmatter keys whose names start with a reserved prefix (`_`, `$`, `.`, `#`, `@`); neither restriction is expressed here.",
+      "description": "JSON Schema (draft 2020-12) for the page's frontmatter mapping. A page with no frontmatter is validated as an empty object."
+    },
+    "maxTokens": {
+      "$ref": "#/$defs/nonNegativeInteger",
+      "description": "Maximum token count of the document body (frontmatter excluded), counted with OpenAI's o200k_base BPE."
+    },
+    "maxDepth": {
+      "$ref": "#/$defs/nonNegativeInteger",
+      "description": "Maximum heading nesting depth allowed anywhere in the document."
+    },
+    "allSections": {
+      "$ref": "#/$defs/reducedSection",
+      "description": "A reduced section schema applied to every section at every depth."
+    },
+    "sections": {
+      "type": "array",
+      "description": "Expected sections, in order. Documents bind headers to entries greedily and without backtracking; an entry left unbound reports as missing.",
+      "items": { "$ref": "#/$defs/section" }
+    },
+    "additionalSections": {
+      "$ref": "#/$defs/additionalSections",
+      "description": "How to treat sections beyond those listed: `false` forbids them, a reduced section schema constrains them, `true` (the default) allows anything."
+    },
+    "blocks": {
+      "type": "array",
+      "description": "Expected content blocks in the document's body, before its first heading.",
+      "items": { "$ref": "#/$defs/block" }
+    },
+    "additionalBlocks": {
+      "$ref": "#/$defs/additionalBlocks",
+      "description": "How to treat blocks beyond those listed: `false` forbids them, a reduced block schema constrains them, `true` (the default) allows anything."
+    },
+    "allBlocks": {
+      "$ref": "#/$defs/reducedBlock",
+      "description": "A reduced block schema applied to every block in scope."
+    }
+  },
+  "$defs": {
+    "nonNegativeInteger": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "scalarText": {
+      "type": ["string", "number", "boolean"],
+      "$comment": "A text-valued keyword. Schemas are read as YAML, whose plain scalars the loader coerces to strings (so `const: 2024` binds the header text \"2024\"); this mirrors that coercion. Quote values to be explicit."
+    },
+    "header": {
+      "type": "object",
+      "description": "Constraints on a header or other short text string (a section header, a code language, a block's or item's own text).",
+      "additionalProperties": false,
+      "not": {
+        "required": ["const", "enum"],
+        "$comment": "const and enum are mutually exclusive."
+      },
+      "properties": {
+        "pattern": {
+          "$ref": "#/$defs/scalarText",
+          "description": "A regular expression the text must match."
+        },
+        "const": {
+          "$ref": "#/$defs/scalarText",
+          "description": "The exact text required."
+        },
+        "enum": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/scalarText" },
+          "description": "The set of allowed texts."
+        },
+        "minLength": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Minimum length in characters."
+        },
+        "maxLength": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Maximum length in characters."
+        },
+        "maxTokens": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Maximum length in tokens."
+        },
+        "description": { "$ref": "#/$defs/scalarText" }
+      }
+    },
+    "headerStrict": {
+      "allOf": [{ "$ref": "#/$defs/header" }],
+      "$comment": "As header, but the text keywords must be actual strings rather than any YAML scalar. Used under additionalSections/additionalBlocks, whose untagged deserialization does not coerce scalars to strings.",
+      "properties": {
+        "pattern": { "type": "string" },
+        "const": { "type": "string" },
+        "enum": { "type": "array", "items": { "type": "string" } },
+        "description": { "type": "string" }
+      }
+    },
+    "section": {
+      "type": "object",
+      "description": "One expected section: a header binding key plus the section's own budgets, nested sections, and blocks.",
+      "additionalProperties": false,
+      "properties": {
+        "header": { "$ref": "#/$defs/header" },
+        "maxTokens": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Maximum token count of the section subtree, header included."
+        },
+        "maxDepth": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Maximum heading nesting depth within the section."
+        },
+        "minContains": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Minimum number of sections that may bind to this entry (default 1)."
+        },
+        "maxContains": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Maximum number of sections that may bind to this entry."
+        },
+        "description": { "$ref": "#/$defs/scalarText" },
+        "allSections": { "$ref": "#/$defs/reducedSection" },
+        "sections": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/section" }
+        },
+        "additionalSections": { "$ref": "#/$defs/additionalSections" },
+        "blocks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/block" }
+        },
+        "additionalBlocks": { "$ref": "#/$defs/additionalBlocks" },
+        "allBlocks": { "$ref": "#/$defs/reducedBlock" }
+      }
+    },
+    "reducedSection": {
+      "type": "object",
+      "description": "A section schema with the structural keywords removed, used for allSections. It may only constrain a section's header, budgets, and depth.",
+      "additionalProperties": false,
+      "properties": {
+        "header": { "$ref": "#/$defs/header" },
+        "maxTokens": { "$ref": "#/$defs/nonNegativeInteger" },
+        "maxDepth": { "$ref": "#/$defs/nonNegativeInteger" },
+        "description": { "$ref": "#/$defs/scalarText" }
+      }
+    },
+    "reducedSectionStrict": {
+      "allOf": [{ "$ref": "#/$defs/reducedSection" }],
+      "$comment": "As reducedSection, but text keywords must be actual strings. additionalSections is deserialized through an untagged union, which — unlike the direct allSections path — does not coerce non-string YAML scalars to strings, so `{ header: { const: 2024 } }` is rejected there.",
+      "properties": {
+        "header": { "$ref": "#/$defs/headerStrict" },
+        "description": { "type": "string" }
+      }
+    },
+    "additionalSections": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "$ref": "#/$defs/reducedSectionStrict" }
+      ]
+    },
+    "block": {
+      "type": "object",
+      "description": "One expected content block. `type` names the block kind; the type-specific keywords (lang, items, minItems, maxItems, blocks, additionalBlocks, allBlocks) apply only to the kinds that support them.",
+      "additionalProperties": false,
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/blockType",
+          "description": "The block kind, or a union of kinds this entry may bind to."
+        },
+        "text": {
+          "$ref": "#/$defs/header",
+          "description": "Constraints on the block's own plain text."
+        },
+        "maxTokens": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Maximum token count of the block's whole subtree."
+        },
+        "minContains": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Minimum number of blocks that may bind to this entry (default 1)."
+        },
+        "maxContains": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Maximum number of blocks that may bind to this entry."
+        },
+        "description": { "$ref": "#/$defs/scalarText" },
+        "lang": {
+          "$ref": "#/$defs/header",
+          "description": "Constraints on a fenced code block's language. Requires `type: code`."
+        },
+        "items": {
+          "$ref": "#/$defs/item",
+          "description": "Schema for each list item. Requires a list type."
+        },
+        "minItems": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Minimum number of list items. Requires a list type."
+        },
+        "maxItems": {
+          "$ref": "#/$defs/nonNegativeInteger",
+          "description": "Maximum number of list items. Requires a list type."
+        },
+        "blocks": {
+          "type": "array",
+          "description": "Expected blocks nested inside a quote. Requires `type: quote`.",
+          "items": { "$ref": "#/$defs/block" }
+        },
+        "additionalBlocks": {
+          "$ref": "#/$defs/additionalBlocks",
+          "description": "How to treat a quote's nested blocks beyond those listed. Requires `type: quote`."
+        },
+        "allBlocks": {
+          "$ref": "#/$defs/reducedBlock",
+          "description": "A reduced block schema applied to every nested block of a quote. Requires `type: quote`."
+        }
+      },
+      "allOf": [
+        {
+          "$comment": "lang requires type: code",
+          "if": { "required": ["lang"] },
+          "then": {
+            "required": ["type"],
+            "properties": { "type": { "$ref": "#/$defs/codeType" } }
+          }
+        },
+        {
+          "$comment": "items / minItems / maxItems require a list type",
+          "if": {
+            "anyOf": [
+              { "required": ["items"] },
+              { "required": ["minItems"] },
+              { "required": ["maxItems"] }
+            ]
+          },
+          "then": {
+            "required": ["type"],
+            "properties": { "type": { "$ref": "#/$defs/listType" } }
+          }
+        },
+        {
+          "$comment": "a non-empty blocks list / additionalBlocks / allBlocks require type: quote (an empty blocks list constrains nothing, matching the compiler)",
+          "if": {
+            "anyOf": [
+              {
+                "required": ["blocks"],
+                "properties": { "blocks": { "type": "array", "minItems": 1 } }
+              },
+              { "required": ["additionalBlocks"] },
+              { "required": ["allBlocks"] }
+            ]
+          },
+          "then": {
+            "required": ["type"],
+            "properties": { "type": { "$ref": "#/$defs/quoteType" } }
+          }
+        }
+      ]
+    },
+    "item": {
+      "type": "object",
+      "description": "Schema for a single list item: its own text, budget, and nested blocks.",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "$ref": "#/$defs/header" },
+        "maxTokens": { "$ref": "#/$defs/nonNegativeInteger" },
+        "description": { "$ref": "#/$defs/scalarText" },
+        "blocks": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/block" }
+        },
+        "additionalBlocks": { "$ref": "#/$defs/additionalBlocks" },
+        "allBlocks": { "$ref": "#/$defs/reducedBlock" }
+      }
+    },
+    "reducedBlock": {
+      "type": "object",
+      "description": "A block schema with the structural and type-specific keywords removed, used for allBlocks. It may only constrain a block's text and token budget.",
+      "additionalProperties": false,
+      "properties": {
+        "text": { "$ref": "#/$defs/header" },
+        "maxTokens": { "$ref": "#/$defs/nonNegativeInteger" },
+        "description": { "$ref": "#/$defs/scalarText" }
+      }
+    },
+    "reducedBlockStrict": {
+      "allOf": [{ "$ref": "#/$defs/reducedBlock" }],
+      "$comment": "As reducedBlock, but text keywords must be actual strings. additionalBlocks is deserialized through an untagged union, which — unlike the direct allBlocks path — does not coerce non-string YAML scalars to strings.",
+      "properties": {
+        "text": { "$ref": "#/$defs/headerStrict" },
+        "description": { "type": "string" }
+      }
+    },
+    "additionalBlocks": {
+      "oneOf": [
+        { "type": "boolean" },
+        { "$ref": "#/$defs/reducedBlockStrict" }
+      ]
+    },
+    "blockKind": {
+      "type": "string",
+      "enum": [
+        "paragraph",
+        "bullet-list",
+        "ordered-list",
+        "code",
+        "quote",
+        "table",
+        "rule"
+      ]
+    },
+    "blockType": {
+      "oneOf": [
+        { "$ref": "#/$defs/blockKind" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/$defs/blockKind" }
+        }
+      ]
+    },
+    "codeType": {
+      "oneOf": [
+        { "const": "code" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "const": "code" }
+        }
+      ]
+    },
+    "listType": {
+      "oneOf": [
+        { "enum": ["bullet-list", "ordered-list"] },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "enum": ["bullet-list", "ordered-list"] }
+        }
+      ]
+    },
+    "quoteType": {
+      "oneOf": [
+        { "const": "quote" },
+        {
+          "type": "array",
+          "minItems": 1,
+          "items": { "const": "quote" }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,18 @@
+[package]
+name = "schematter-lib"
+description = "Schema validation for markdown documents: JSON Schema over frontmatter, plus a structural schema over the section and block tree."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+repository.workspace = true
+
+[dependencies]
+schematter-validator = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+pulldown-cmark = { workspace = true }
+tiktoken-rs = { workspace = true }
+
+[dev-dependencies]
+indoc = { workspace = true }

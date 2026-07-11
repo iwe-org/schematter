@@ -1,0 +1,18 @@
+[package]
+name = "schematter-validator"
+description = "Low-level validation for schematter document schemas via domain objects: the parsed-document model, the schema compiler, and the matcher, independent of any markup parser."
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+version.workspace = true
+repository.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml_ng = { workspace = true }
+regex = { workspace = true }
+jsonschema = { workspace = true }
+
+[dev-dependencies]
+indoc = { workspace = true }
