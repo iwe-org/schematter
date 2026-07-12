@@ -1,11 +1,5 @@
 use wasm_bindgen::prelude::*;
 
-/// Validate a markdown `document` against a `schema` source.
-///
-/// Returns a JSON string. On success:
-/// `{"ok":true,"violations":[{breadcrumb,message,hint,schemaPath,keyword}, ...]}`
-/// (an empty list means the document conforms). When the schema itself does not
-/// compile: `{"ok":false,"errors":[{pointer,message}, ...]}`.
 #[wasm_bindgen]
 pub fn validate(document: &str, schema: &str) -> String {
     match schematter_lib::validate(document, schema) {
@@ -29,7 +23,6 @@ pub fn validate(document: &str, schema: &str) -> String {
     }
 }
 
-/// The document-schema dialect this build validates against.
 #[wasm_bindgen]
 pub fn dialect() -> String {
     "https://document-schema.org/draft/2026-06/schema".to_string()

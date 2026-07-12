@@ -1,6 +1,3 @@
-# Standalone crate, excluded from the workspace (wasm-bindgen cdylibs do not
-# link on native targets). Deps are spelled out rather than inherited from the
-# workspace for the same reason. Build with ./build-wasm.sh.
 [package]
 name = "schematter-wasm"
 description = "WebAssembly bindings for schematter: validate a markdown document against a document schema in the browser."
@@ -17,15 +14,7 @@ crate-type = ["cdylib", "rlib"]
 schematter-lib = { path = "../schematter-lib" }
 serde_json = "1"
 wasm-bindgen = "0.2"
-
-# getrandom is pulled in transitively (ahash -> jsonschema). On
-# wasm32-unknown-unknown it has no default backend, so enable the JS one. The
-# matching `--cfg getrandom_backend="wasm_js"` is set only for the wasm build
-# (see build-wasm.sh).
 getrandom = { version = "0.3", features = ["wasm_js"] }
 
-# Skip wasm-opt so the build has no dependency on a downloaded binaryen; the
-# binary is dominated by tiktoken's embedded BPE table, which wasm-opt cannot
-# shrink anyway. Run wasm-opt -Oz manually later if size matters.
 [package.metadata.wasm-pack.profile.release]
 wasm-opt = false

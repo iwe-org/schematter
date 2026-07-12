@@ -1,7 +1,5 @@
 [workspace]
 members = ["crates/schematter", "crates/schematter-lib", "crates/schematter-validator"]
-# schematter-wasm is a wasm-bindgen cdylib that does not link on native targets;
-# keep it out of the default workspace build. Build it with its own build-wasm.sh.
 exclude = ["crates/schematter-wasm"]
 resolver = "2"
 

@@ -1,13 +1,16 @@
 # schematter
 
-Schema validation for markdown documents. A **document schema** declares the
-required shape of a page — which frontmatter fields it carries, which sections
-it contains and in what order, how headers are written, how deep the heading
-tree may nest, and how large each part may grow — and `schematter` checks a
-document against it, returning a list of violations.
+`schematter` is the validator for the [**document-schema**](https://document-schema.org/)
+format — a JSON-Schema-aligned language for declaring the required shape of a
+markdown page: which frontmatter fields it carries, which sections it contains
+and in what order, how headers are written, how deep the heading tree may nest,
+and how large each part may grow. Give it a document and a schema and it returns
+a list of violations.
 
 Think JSON Schema, but for the *structure* of a markdown page rather than the
-structure of a JSON value.
+structure of a JSON value. The format itself — the full language, the keyword
+reference, and the JSON Schema meta-schema — is specified at
+[document-schema.org](https://document-schema.org/).
 
 ## Why
 

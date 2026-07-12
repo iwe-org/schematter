@@ -75,7 +75,10 @@ fn missing_required_section_carries_its_description_as_hint() {
     "};
     let violations = hits("# Other\n", schema);
     assert_eq!(violations.len(), 1);
-    assert_eq!(violations[0].message, "required section \"Summary\" is missing");
+    assert_eq!(
+        violations[0].message,
+        "required section \"Summary\" is missing"
+    );
     assert_eq!(
         violations[0].hint.as_deref(),
         Some("every note opens with a summary")
@@ -373,7 +376,10 @@ fn list_length_bounds_are_checked() {
         schema,
     );
     assert_eq!(short.len(), 1);
-    assert_eq!(short[0].message, "list has 1 item, less than the minimum of 2");
+    assert_eq!(
+        short[0].message,
+        "list has 1 item, less than the minimum of 2"
+    );
 }
 
 #[test]
@@ -670,5 +676,8 @@ fn list_max_items_is_enforced() {
         schema,
     );
     assert_eq!(long.len(), 1);
-    assert_eq!(long[0].message, "list has 3 items, greater than the maximum of 2");
+    assert_eq!(
+        long[0].message,
+        "list has 3 items, greater than the maximum of 2"
+    );
 }

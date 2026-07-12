@@ -377,7 +377,10 @@ fn walk_blocks<'a>(
         let count = counts[index];
         if count < entry.min_contains && !suppressed[index] {
             let message = if count == 0 {
-                format!("required block {} is missing", block_entry_name(entry, index))
+                format!(
+                    "required block {} is missing",
+                    block_entry_name(entry, index)
+                )
             } else {
                 format!(
                     "block {} appears {}, less than the minimum of {}",
