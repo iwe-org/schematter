@@ -169,6 +169,28 @@ JSON-Schema-aware YAML editor at it (or add `$schema:
 https://document-schema.org/draft/2026-06/schema` to a schema file) for
 completion and validation as you write.
 
+## Checking OKF conformance
+
+[Open Knowledge Format](https://github.com/GoogleCloudPlatform/knowledge-catalog/blob/main/okf/SPEC.md)
+bundles are markdown with YAML frontmatter, and OKF's conformance rules
+(SPEC §11) are precisely what a document schema states: every concept
+carries a non-empty `type`, and the reserved `index.md` / `log.md` files
+follow a prescribed body shape — sections of link bullets, date-grouped
+history. The body rules are out of reach for plain JSON Schema;
+`schematter` checks both halves.
+
+[`examples/okf/`](examples/okf/) ships the three schemas — `okf.yaml` for
+concept documents, `okf-index.yaml` and `okf-log.yaml` for the reserved
+files:
+
+```bash
+schematter validate concept.md --schema examples/okf/okf.yaml
+```
+
+Or try the OKF preset in the
+[playground](https://document-schema.org/#playground) — the validator
+runs in your browser.
+
 ## Install
 
 ```bash
