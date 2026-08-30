@@ -7,12 +7,12 @@ resolver = "2"
 edition = "2021"
 rust-version = "1.82"
 license = "Apache-2.0"
-version = "0.1.0"
+version = "0.2.0"
 repository = "https://github.com/iwe-org/schematter"
 
 [workspace.dependencies]
-schematter-lib = { path = "crates/schematter-lib", version = "0.1.0" }
-schematter-validator = { path = "crates/schematter-validator", version = "0.1.0" }
+schematter-lib = { path = "crates/schematter-lib", version = "0.2.0" }
+schematter-validator = { path = "crates/schematter-validator", version = "0.2.0" }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml_ng = "0.10"

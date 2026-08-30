@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/iwe-org/schematter/compare/schematter-validator-v0.1.0...schematter-validator-v0.2.0) - 2026-08-30
+
 ### Added
 - `$ref` keyword in the document schema dialect, at document, section, block and item level, together with top-level `$id` and `$defs`; `DocumentSchema` gained the matching `id` and `defs` fields
 - `resolve` module with `CompileOptions` — register schemas by URI, set a base URI, attach a resolver — plus the `Resolver` trait and the `ResolveError` alias

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0](https://github.com/iwe-org/schematter/compare/schematter-lib-v0.1.0...schematter-lib-v0.2.0) - 2026-08-30
+
 ### Added
 - `validate_with(markdown, schema, options)` validates against a schema whose external references are resolved through the given options
 - `CompileOptions`, `Resolver`, `ResolveError` and `compile_schema_with` re-exported from `schematter-validator`
