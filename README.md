@@ -245,6 +245,19 @@ good  [schema: event]
   paragraph "Jon visited Paris. He described the expe..."  ->  blocks[0]
 ```
 
+A schema that references another — through the dialect's `$ref` keyword, or a
+JSON Schema `$ref` in its `frontmatter` — needs the targets named up front;
+nothing is ever fetched on its own:
+
+```bash
+schematter validate NOTE.md --schema note.yaml \
+  --ref https://schemas.example.com/shared.yaml=shared.yaml
+schematter validate NOTE.md --schema note.yaml --resolve-refs
+```
+
+`--resolve-refs` reads whatever is left from disk, resolved against the schema
+file's directory; `http`/`https` are refused by scheme.
+
 ## Library
 
 ```rust
@@ -257,7 +270,9 @@ assert!(violations.is_empty());
 `validate` returns `Err(Vec<SchemaError>)` when the schema itself doesn't
 compile, and `Ok(Vec<Violation>)` otherwise; each `Violation` carries a
 message, a breadcrumb into the document, a JSON pointer into the schema, the
-failing keyword, and the hint.
+failing keyword, and the hint. `validate_with` takes the same arguments plus a
+`CompileOptions` carrying the external schemas a `$ref` may resolve to, and an
+optional resolver consulted only for what those do not cover.
 
 ## Layout
 

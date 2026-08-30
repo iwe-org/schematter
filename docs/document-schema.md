@@ -104,6 +104,9 @@ The top level of a schema file:
 | Keyword              | Value                          | Meaning                                                                |
 | -------------------- | ------------------------------ | ---------------------------------------------------------------------- |
 | `$schema`            | string                         | optional dialect id                                                     |
+| `$id`                | string                         | base URI the references in this schema resolve against (§11)            |
+| `$ref`               | string                         | another document schema, merged into this one (§11)                     |
+| `$defs`              | map of name to node            | named subschemas for `$ref` to point at (§11)                           |
 | `description`        | string                         | default hint for document-level violations                              |
 | `frontmatter`        | JSON Schema                    | validates the frontmatter mapping                                       |
 | `maxTokens`          | integer                        | budget for the whole body                                               |
@@ -116,8 +119,13 @@ The top level of a schema file:
 | `allBlocks`          | reduced block schema (§8)      | applies to every block at every depth                                   |
 
 The `frontmatter` value is standard JSON Schema, draft 2020-12, with
-`format` assertions enabled. Only in-document references (`#/...`) are
-allowed; external and remote `$ref` are rejected.
+`format` assertions enabled. In-document references (`#/...`) always work; an
+external `$ref` resolves only against schemas supplied to the validator up
+front, and is rejected otherwise (§11).
+
+Three further keywords carry references rather than constraints: `$id` (this
+schema's base URI), `$ref` (another document schema, merged in), and `$defs`
+(named subschemas to point `$ref` at). They are covered in §11.
 
 ## 4. Section schema
 
@@ -125,6 +133,7 @@ An item in a `sections` array is always a section.
 
 | Keyword              | Value                          | Meaning                                                                  |
 | -------------------- | ------------------------------ | ------------------------------------------------------------------------ |
+| `$ref`               | string                         | another section schema, merged into this entry (§11)                      |
 | `header`             | header schema (§5)             | constrains the header text; also decides binding (§7)                     |
 | `maxTokens`          | integer                        | budget for this section's subtree, header included                        |
 | `maxDepth`           | integer                        | maximum nesting below this section (`1` allows children, forbids deeper)  |
@@ -295,6 +304,7 @@ scope (document, enclosing sections, enclosing containers) all apply.
 
 | Keyword            | Value                        | Meaning                                                        | Types   |
 | ------------------ | ---------------------------- | -------------------------------------------------------------- | ------- |
+| `$ref`             | string                       | another block schema, merged into this entry (§11)             | all     |
 | `type`             | one of the seven, or a list  | the block kind(s); part of the binding identity (§8.5)         | all     |
 | `text`             | text schema (§5)             | constrains the block's plain text; part of the binding identity | all   |
 | `maxTokens`        | integer                      | budget for this block's whole subtree                          | all     |
@@ -448,8 +458,10 @@ and exits `2` before validating any document, rather than reporting them as
 violations:
 
 - a `$schema` value naming any dialect other than the accepted one;
-- a `frontmatter` subschema that fails the 2020-12 meta-schema, or contains
-  an external or remote `$ref`;
+- a `frontmatter` subschema that fails the 2020-12 meta-schema, or one whose
+  external `$ref` was not supplied to the validator (§11);
+- a `$ref` that cannot be resolved — no schema under that URI, no such node at
+  that pointer, a target that is not a document schema, or a reference cycle;
 - an unknown keyword anywhere outside `frontmatter` — unlike JSON Schema,
   unknown keywords are rejected, so a typo cannot silently validate nothing
   (`ordered` is not a keyword, so it reports as unknown);
@@ -465,7 +477,97 @@ violations:
   match and starves the entries after it; or an entry whose identity exactly
   duplicates an earlier one, since the earlier always binds first.
 
-## 11. Examples
+## 11. References
+
+`$ref` names another document schema — a whole file, or one node inside it —
+and splices it in at the referencing site. It is the dialect's own keyword,
+written on the document itself or on any section, block, item, or header
+entry:
+
+``` yaml
+$id: https://schemas.example.com/note.yaml
+$defs:
+  summary:
+    header: { const: Summary }
+    description: every note opens with a summary
+sections:
+  - $ref: "#/$defs/summary"
+  - $ref: "https://schemas.example.com/shared.yaml#/sections/0"
+    maxTokens: 200
+```
+
+The rules follow JSON Schema 2020-12:
+
+- **Value.** A URI reference. It resolves against the schema's own `$id` when
+  it has one, else against the URI the schema was registered or retrieved
+  under, else — in the CLI — against the schema file's own location. A schema
+  that has been loaded is addressable under both: the URI it came from and its
+  own `$id`.
+- **Fragment.** A JSON Pointer into the referenced document (`#/sections/0`,
+  `#/$defs/summary`); an empty fragment means the whole document. `$defs` holds
+  named subschemas, which are never applied on their own.
+- **Merging.** The referenced node replaces the referencing one, and the
+  referencing node's remaining keywords override what the target carries — the
+  `maxTokens: 200` above wins over the shared entry's own budget. A
+  document-level `$ref` merges into the root the same way.
+- **Kind.** The target must be a document schema: a `$schema` on it, if
+  present, must name this dialect, and a pointer may not descend into a
+  `frontmatter` node — that content is JSON Schema, not this dialect. The
+  check reads `$schema`, which is optional, so declare it on any schema you
+  publish for others to reference: it is what turns a mix-up into an error
+  instead of a silently permissive one.
+- **Cycles** are detected and reported as schema errors naming the URIs
+  involved.
+
+Resolution runs before compilation, so everything downstream — unknown-keyword
+checks, reachability, budgets — sees the spliced result.
+
+### 11.1 References inside frontmatter
+
+Inside `frontmatter`, `$ref` is standard JSON Schema and belongs to the JSON
+Schema layer; the dialect's resolution never descends into it. Same-document
+references work unaided. An external one needs its target supplied:
+
+``` yaml
+frontmatter:
+  $ref: https://schemas.example.com/meta.json
+```
+
+References go one way only. A document schema may point at other document
+schemas, and its `frontmatter` may point at JSON Schemas; a JSON Schema can
+never point back at a document schema, and doing so is a schema error — again
+recognized by the target's `$schema`, so a document schema that omits it is
+read here as an ordinary, and near-empty, JSON Schema.
+
+### 11.2 Supplying external schemas
+
+External URIs are never fetched on their own — the validator performs no I/O.
+One registry answers both kinds of reference, and an optional resolver is
+consulted only for what the registry does not hold:
+
+``` bash
+schematter validate NOTE.md --schema note.yaml \
+  --ref https://schemas.example.com/shared.yaml=shared.yaml
+
+schematter validate NOTE.md --schema note.yaml --resolve-refs
+```
+
+`--ref URI=FILE` registers a file under a URI and repeats; `--ref FILE` alone
+takes the URI from the file's own `$id`. `--resolve-refs` reads whatever is
+left from disk, resolved against the schema file's directory — `file:` and
+relative references only, with `http`/`https` refused by scheme.
+
+The library takes the same two layers as `CompileOptions`:
+
+``` rust
+let options = schematter_lib::CompileOptions::new()
+    .with_schema("https://schemas.example.com/shared.yaml", shared)
+    .with_resolver(|uri: &str| load_from_cache(uri));
+
+let violations = schematter_lib::validate_with(markdown, schema, &options)?;
+```
+
+## 12. Examples
 
 Header discipline for a whole store — every header capitalized and short,
 every section within budget, nothing deeper than `###`:

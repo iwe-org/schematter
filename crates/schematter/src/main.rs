@@ -3,10 +3,10 @@ use std::io::{self, Read};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use schematter_lib::tokens::count_tokens;
-use schematter_lib::{build_document, compile_schema, Violation};
+use schematter_lib::{build_document, compile_schema_with, CompileOptions, Violation};
 
 /// Validate markdown documents against a document schema.
 #[derive(Parser)]
@@ -35,7 +35,37 @@ enum Command {
         /// entry) instead of validating.
         #[arg(long)]
         explain: bool,
+
+        /// Register a schema `$ref` may resolve to, as `URI=FILE` (or as
+        /// `FILE` alone when the file carries its own `$id`). Repeatable.
+        #[arg(long = "ref", value_name = "URI=FILE", value_parser = parse_ref)]
+        refs: Vec<Reference>,
+
+        /// Read unregistered references from disk, resolved against the schema
+        /// file's own location. Only `file:` and relative references.
+        #[arg(long)]
+        resolve_refs: bool,
     },
+}
+
+#[derive(Clone)]
+struct Reference {
+    uri: Option<String>,
+    path: PathBuf,
+}
+
+fn parse_ref(value: &str) -> Result<Reference, String> {
+    match value.split_once('=') {
+        Some((uri, path)) if !uri.is_empty() && !path.is_empty() => Ok(Reference {
+            uri: Some(uri.to_string()),
+            path: PathBuf::from(path),
+        }),
+        Some(_) => Err("expected URI=FILE".to_string()),
+        None => Ok(Reference {
+            uri: None,
+            path: PathBuf::from(value),
+        }),
+    }
 }
 
 #[derive(Copy, Clone, ValueEnum)]
@@ -63,7 +93,9 @@ fn run() -> Result<ExitCode> {
             schema,
             format,
             explain,
-        } => validate(markdown, schema, format, explain),
+            refs,
+            resolve_refs,
+        } => validate(markdown, schema, format, explain, refs, resolve_refs),
     }
 }
 
@@ -77,12 +109,15 @@ fn validate(
     schema: PathBuf,
     format: Format,
     explain: bool,
+    refs: Vec<Reference>,
+    resolve_refs: bool,
 ) -> Result<ExitCode> {
     let schema_source = fs::read_to_string(&schema)
         .with_context(|| format!("reading schema {}", schema.display()))?;
     let schema_name = schema_name(&schema);
+    let options = compile_options(&schema, &refs, resolve_refs)?;
 
-    let compiled = match compile_schema(&schema_source) {
+    let compiled = match compile_schema_with(&schema_source, &options) {
         Ok(compiled) => compiled,
         Err(errors) => {
             for error in errors {
@@ -133,6 +168,121 @@ fn validate(
     } else {
         ExitCode::from(1)
     })
+}
+
+fn compile_options(
+    schema: &Path,
+    refs: &[Reference],
+    resolve_refs: bool,
+) -> Result<CompileOptions> {
+    let mut options = CompileOptions::new().with_base_uri(file_uri(schema));
+
+    for reference in refs {
+        let value = read_schema(&reference.path)?;
+        let uri = match &reference.uri {
+            Some(uri) => uri.clone(),
+            None => value
+                .get("$id")
+                .and_then(|id| id.as_str())
+                .map(str::to_string)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "{} has no $id; register it as URI={}",
+                        reference.path.display(),
+                        reference.path.display()
+                    )
+                })?,
+        };
+        options = options.with_schema(uri, value);
+    }
+
+    if resolve_refs {
+        let directory = schema
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or(Path::new("."))
+            .to_path_buf();
+        options = options.with_resolver(move |uri: &str| resolve_from_disk(uri, &directory));
+    }
+
+    Ok(options)
+}
+
+fn read_schema(path: &Path) -> Result<serde_json::Value> {
+    let source =
+        fs::read_to_string(path).with_context(|| format!("reading schema {}", path.display()))?;
+    parse_schema(&source).with_context(|| format!("parsing schema {}", path.display()))
+}
+
+fn parse_schema(source: &str) -> Result<serde_json::Value> {
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(source)?;
+    Ok(serde_json::to_value(value)?)
+}
+
+fn resolve_from_disk(uri: &str, directory: &Path) -> Result<serde_json::Value, String> {
+    let path = match scheme(uri) {
+        Some("file") => PathBuf::from(decode(strip_authority(&uri["file:".len()..]))),
+        Some(scheme) => {
+            return Err(format!(
+            "'{scheme}:' references are not read from disk; only file and relative references are"
+        ))
+        }
+        None => directory.join(uri),
+    };
+    let source =
+        fs::read_to_string(&path).map_err(|error| format!("{}: {error}", path.display()))?;
+    parse_schema(&source).map_err(|error| format!("{}: {error}", path.display()))
+}
+
+fn scheme(uri: &str) -> Option<&str> {
+    let end = uri.find(':')?;
+    let scheme = &uri[..end];
+    let mut chars = scheme.chars();
+    if !chars.next()?.is_ascii_alphabetic() {
+        return None;
+    }
+    chars
+        .all(|char| char.is_ascii_alphanumeric() || matches!(char, '+' | '-' | '.'))
+        .then_some(scheme)
+}
+
+fn strip_authority(rest: &str) -> &str {
+    rest.strip_prefix("//").unwrap_or(rest)
+}
+
+fn decode(encoded: &str) -> String {
+    let bytes = encoded.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut at = 0;
+    while at < bytes.len() {
+        if bytes[at] == b'%' && at + 2 < bytes.len() {
+            if let Ok(byte) = u8::from_str_radix(&encoded[at + 1..at + 3], 16) {
+                out.push(byte);
+                at += 3;
+                continue;
+            }
+        }
+        out.push(bytes[at]);
+        at += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn file_uri(path: &Path) -> String {
+    let absolute = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    let mut uri = String::from("file://");
+    for char in absolute.to_string_lossy().chars() {
+        match char {
+            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '.' | '_' | '~' | '/' => uri.push(char),
+            _ => {
+                let mut buffer = [0u8; 4];
+                for byte in char.encode_utf8(&mut buffer).bytes() {
+                    uri.push_str(&format!("%{byte:02X}"));
+                }
+            }
+        }
+    }
+    uri
 }
 
 fn read_inputs(paths: &[PathBuf]) -> Result<Vec<(String, String)>> {

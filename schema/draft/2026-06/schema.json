@@ -11,13 +11,25 @@
       "const": "https://document-schema.org/draft/2026-06/schema",
       "description": "The dialect this schema is written in. Optional; when present it must name this dialect."
     },
+    "$id": {
+      "$ref": "#/$defs/scalarText",
+      "description": "Base URI of this schema. Relative `$ref` values in it resolve against this URI."
+    },
+    "$ref": {
+      "$ref": "#/$defs/reference",
+      "description": "Reference to another document schema, merged into this one; sibling keywords override the referenced ones."
+    },
+    "$defs": {
+      "type": "object",
+      "description": "Named subschemas, addressable as `#/$defs/<name>`. Nothing here is applied on its own."
+    },
     "description": {
       "$ref": "#/$defs/scalarText",
       "description": "Human-readable note attached to the whole document. The nearest description is reported as the hint on every violation, so it documents the convention it enforces."
     },
     "frontmatter": {
       "$ref": "https://json-schema.org/draft/2020-12/schema",
-      "$comment": "Literal JSON Schema (draft 2020-12), applied to the page's YAML frontmatter with format assertions enabled. schematter additionally forbids external `$ref` (only same-document `#`-fragments are allowed) and hides frontmatter keys whose names start with a reserved prefix (`_`, `$`, `.`, `#`, `@`); neither restriction is expressed here.",
+      "$comment": "Literal JSON Schema (draft 2020-12), applied to the page's YAML frontmatter with format assertions enabled. schematter resolves external `$ref` only against the schemas supplied to the validator (API options, `--ref`, or `--resolve-refs`) and rejects them otherwise, and it hides frontmatter keys whose names start with a reserved prefix (`_`, `$`, `.`, `#`, `@`); neither rule is expressed here.",
       "description": "JSON Schema (draft 2020-12) for the page's frontmatter mapping. A page with no frontmatter is validated as an empty object."
     },
     "maxTokens": {
@@ -56,6 +68,10 @@
     }
   },
   "$defs": {
+    "reference": {
+      "type": "string",
+      "$comment": "A URI reference to another document schema. Resolution is performed before compilation: the referenced node replaces the referencing one, with sibling keywords overriding it. External URIs must be supplied to the validator (API options, `--ref`, or `--resolve-refs`)."
+    },
     "nonNegativeInteger": {
       "type": "integer",
       "minimum": 0
@@ -73,6 +89,7 @@
         "$comment": "const and enum are mutually exclusive."
       },
       "properties": {
+        "$ref": { "$ref": "#/$defs/reference" },
         "pattern": {
           "$ref": "#/$defs/scalarText",
           "description": "A regular expression the text must match."
@@ -116,6 +133,7 @@
       "description": "One expected section: a header binding key plus the section's own budgets, nested sections, and blocks.",
       "additionalProperties": false,
       "properties": {
+        "$ref": { "$ref": "#/$defs/reference" },
         "header": { "$ref": "#/$defs/header" },
         "maxTokens": {
           "$ref": "#/$defs/nonNegativeInteger",
@@ -153,6 +171,7 @@
       "description": "A section schema with the structural keywords removed, used for allSections. It may only constrain a section's header, budgets, and depth.",
       "additionalProperties": false,
       "properties": {
+        "$ref": { "$ref": "#/$defs/reference" },
         "header": { "$ref": "#/$defs/header" },
         "maxTokens": { "$ref": "#/$defs/nonNegativeInteger" },
         "maxDepth": { "$ref": "#/$defs/nonNegativeInteger" },
@@ -178,6 +197,7 @@
       "description": "One expected content block. `type` names the block kind; the type-specific keywords (lang, items, minItems, maxItems, blocks, additionalBlocks, allBlocks) apply only to the kinds that support them.",
       "additionalProperties": false,
       "properties": {
+        "$ref": { "$ref": "#/$defs/reference" },
         "type": {
           "$ref": "#/$defs/blockType",
           "description": "The block kind, or a union of kinds this entry may bind to."
@@ -276,6 +296,7 @@
       "description": "Schema for a single list item: its own text, budget, and nested blocks.",
       "additionalProperties": false,
       "properties": {
+        "$ref": { "$ref": "#/$defs/reference" },
         "text": { "$ref": "#/$defs/header" },
         "maxTokens": { "$ref": "#/$defs/nonNegativeInteger" },
         "description": { "$ref": "#/$defs/scalarText" },
@@ -292,6 +313,7 @@
       "description": "A block schema with the structural and type-specific keywords removed, used for allBlocks. It may only constrain a block's text and token budget.",
       "additionalProperties": false,
       "properties": {
+        "$ref": { "$ref": "#/$defs/reference" },
         "text": { "$ref": "#/$defs/header" },
         "maxTokens": { "$ref": "#/$defs/nonNegativeInteger" },
         "description": { "$ref": "#/$defs/scalarText" }
