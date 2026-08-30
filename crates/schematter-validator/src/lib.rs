@@ -18,8 +18,11 @@
 pub mod compile;
 pub mod dialect;
 pub mod document;
+mod refs;
+pub mod resolve;
 pub mod violation;
 
-pub use compile::{compile_schema, CompiledSchema, SchemaError};
+pub use compile::{compile_schema, compile_schema_with, CompiledSchema, SchemaError};
 pub use document::{Block, BlockKind, Document, Item, Section};
+pub use resolve::{CompileOptions, ResolveError, Resolver};
 pub use violation::{Crumb, Violation};

@@ -855,6 +855,7 @@ dependencies = [
  "indoc",
  "schematter-lib",
  "serde_json",
+ "serde_yaml_ng",
  "tempfile",
 ]
 

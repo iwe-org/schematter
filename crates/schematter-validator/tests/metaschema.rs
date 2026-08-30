@@ -205,6 +205,40 @@ fn structural_keyword_in_all_blocks_is_rejected() {
 }
 
 #[test]
+fn references_and_definitions_are_accepted() {
+    let source = indoc! {"
+        $id: https://example.com/main.yaml
+        $defs:
+          summary:
+            header: { const: Summary }
+        sections:
+          - $ref: '#/$defs/summary'
+          - header: { const: Tasks }
+            blocks:
+              - $ref: https://example.com/lib.yaml#/blocks/0
+    "};
+    assert!(accepts(&metaschema(), source));
+}
+
+#[test]
+fn top_level_reference_is_accepted() {
+    let source = indoc! {"
+        $ref: https://example.com/lib.yaml
+        maxTokens: 400
+    "};
+    assert!(accepts(&metaschema(), source));
+}
+
+#[test]
+fn non_string_reference_is_rejected() {
+    let source = indoc! {"
+        sections:
+          - $ref: 3
+    "};
+    assert!(!accepts(&metaschema(), source));
+}
+
+#[test]
 fn unknown_dialect_is_rejected() {
     let source = "$schema: https://document-schema.org/draft/2027-01/schema\n";
     assert!(!accepts(&metaschema(), source));

@@ -681,3 +681,59 @@ fn list_max_items_is_enforced() {
         "list has 3 items, greater than the maximum of 2"
     );
 }
+
+// --- external references ---------------------------------------------------
+
+#[test]
+fn external_document_and_json_schema_refs_resolve() {
+    let options = schematter_lib::CompileOptions::new()
+        .with_schema(
+            "https://example.com/lib.yaml",
+            serde_json::json!({
+                "sections": [{ "header": { "const": "Summary" } }],
+            }),
+        )
+        .with_schema(
+            "https://example.com/meta.json",
+            serde_json::json!({ "type": "object", "required": ["status"] }),
+        );
+    let schema = indoc! {"
+        frontmatter:
+          $ref: https://example.com/meta.json
+        sections:
+          - $ref: 'https://example.com/lib.yaml#/sections/0'
+        additionalSections: false
+    "};
+    let clean = indoc! {"
+        ---
+        status: draft
+        ---
+
+        # Summary
+
+        text
+    "};
+    assert_eq!(
+        schematter_lib::validate_with(clean, schema, &options).expect("schema compiles"),
+        vec![]
+    );
+
+    let broken = indoc! {"
+        # Notes
+
+        text
+    "};
+    let messages: Vec<String> = schematter_lib::validate_with(broken, schema, &options)
+        .expect("schema compiles")
+        .iter()
+        .map(|violation| violation.message.clone())
+        .collect();
+    assert_eq!(
+        messages,
+        vec![
+            "\"status\" is a required property".to_string(),
+            "required section \"Summary\" is missing".to_string(),
+            "unexpected section".to_string(),
+        ]
+    );
+}

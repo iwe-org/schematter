@@ -27,7 +27,11 @@ import init, { validate, dialect } from "./pkg/schematter_wasm.js";
 
 await init();
 
-const result = JSON.parse(validate(markdownSource, schemaSource));
+const refs = JSON.stringify({
+  "https://schemas.example.com/shared.yaml": { sections: [{ header: { const: "Summary" } }] },
+});
+
+const result = JSON.parse(validate(markdownSource, schemaSource, refs));
 // { ok: true,  violations: [ ... ] }  when the schema compiled
 // { ok: false, errors:     [ ... ] }  when the schema itself is invalid
 
@@ -38,6 +42,12 @@ dialect(); // "https://document-schema.org/draft/2026-06/schema"
 violations (empty when the document conforms); on an invalid schema, `ok: false`
 with the load errors, each carrying a `pointer` and a `message`. `dialect`
 returns the meta-schema URI for the schema language.
+
+The third argument registers the schemas a `$ref` may resolve to — a JSON
+object mapping URI to schema, serving both the dialect's own `$ref` and JSON
+Schema `$ref` inside `frontmatter`. Pass `"{}"` or `""` when there are none;
+references to anything unregistered are reported as schema errors, since the
+browser build never fetches on its own.
 
 ## License
 

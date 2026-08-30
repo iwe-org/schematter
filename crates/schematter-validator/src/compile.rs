@@ -1,4 +1,6 @@
-use jsonschema::{Draft, Validator};
+use std::sync::Arc;
+
+use jsonschema::{Draft, Registry, Resource, Validator};
 use regex::Regex;
 use serde_json::Value;
 use serde_yaml_ng::Mapping;
@@ -8,6 +10,8 @@ use crate::dialect::{
     ItemSchema, ReducedBlock, ReducedSection, SectionSchema, TypeSpec,
 };
 use crate::document::BlockKind;
+use crate::refs::resolve_refs;
+use crate::resolve::{is_document_schema, CompileOptions, Fetcher, SchemaRetriever};
 
 mod eval;
 
@@ -143,7 +147,17 @@ enum Context {
 }
 
 pub fn compile_schema(source: &str) -> Result<CompiledSchema, Vec<SchemaError>> {
-    let document = match parse_dialect(source) {
+    compile_schema_with(source, &CompileOptions::default())
+}
+
+pub fn compile_schema_with(
+    source: &str,
+    options: &CompileOptions,
+) -> Result<CompiledSchema, Vec<SchemaError>> {
+    let fetcher = Fetcher::new(options);
+    let source = resolve_refs(source, &fetcher)?;
+
+    let document = match parse_dialect(&source) {
         Ok(document) => document,
         Err(error) => {
             return Err(vec![SchemaError {
@@ -154,7 +168,7 @@ pub fn compile_schema(source: &str) -> Result<CompiledSchema, Vec<SchemaError>> 
     };
 
     let mut errors = Vec::new();
-    let compiled = compile_document(&document, &mut errors);
+    let compiled = compile_document(&document, &fetcher, &mut errors);
 
     if errors.is_empty() {
         Ok(compiled)
@@ -163,7 +177,11 @@ pub fn compile_schema(source: &str) -> Result<CompiledSchema, Vec<SchemaError>> 
     }
 }
 
-fn compile_document(document: &DocumentSchema, errors: &mut Vec<SchemaError>) -> CompiledSchema {
+fn compile_document(
+    document: &DocumentSchema,
+    fetcher: &Arc<Fetcher>,
+    errors: &mut Vec<SchemaError>,
+) -> CompiledSchema {
     if let Some(dialect) = &document.dialect {
         if dialect != DIALECT_V1 {
             errors.push(SchemaError {
@@ -178,7 +196,7 @@ fn compile_document(document: &DocumentSchema, errors: &mut Vec<SchemaError>) ->
     let frontmatter = document
         .frontmatter
         .as_ref()
-        .and_then(|value| compile_frontmatter(value, errors));
+        .and_then(|value| compile_frontmatter(value, fetcher, errors));
 
     let all_sections = document
         .all_sections
@@ -770,16 +788,60 @@ fn check_count_pair(
     }
 }
 
-fn compile_frontmatter(value: &Value, errors: &mut Vec<SchemaError>) -> Option<Validator> {
-    if has_external_ref(value) {
-        errors.push(SchemaError {
-            pointer: "/frontmatter".to_string(),
-            message: "external references are not allowed".to_string(),
-        });
-        return None;
+fn compile_frontmatter(
+    value: &Value,
+    fetcher: &Arc<Fetcher>,
+    errors: &mut Vec<SchemaError>,
+) -> Option<Validator> {
+    if fetcher.is_empty() {
+        if has_external_ref(value) {
+            errors.push(SchemaError {
+                pointer: "/frontmatter".to_string(),
+                message: "external references are not allowed".to_string(),
+            });
+            return None;
+        }
+        return build_frontmatter(jsonschema::options(), value, errors);
     }
 
-    match jsonschema::options()
+    let resources = fetcher
+        .schemas()
+        .iter()
+        .filter(|(_, schema)| !is_document_schema(schema))
+        .map(|(uri, schema)| (uri.clone(), Resource::from_contents(schema.clone())));
+
+    let registry = Registry::new()
+        .draft(Draft::Draft202012)
+        .retriever(SchemaRetriever(fetcher.clone()))
+        .extend(resources)
+        .and_then(|builder| builder.prepare());
+
+    let registry = match registry {
+        Ok(registry) => registry,
+        Err(error) => {
+            errors.push(SchemaError {
+                pointer: "/frontmatter".to_string(),
+                message: error.to_string(),
+            });
+            return None;
+        }
+    };
+
+    let mut options = jsonschema::options()
+        .with_registry(&registry)
+        .with_retriever(SchemaRetriever(fetcher.clone()));
+    if let Some(base_uri) = fetcher.base_uri() {
+        options = options.with_base_uri(base_uri.to_string());
+    }
+    build_frontmatter(options, value, errors)
+}
+
+fn build_frontmatter(
+    options: jsonschema::ValidationOptions,
+    value: &Value,
+    errors: &mut Vec<SchemaError>,
+) -> Option<Validator> {
+    match options
         .with_draft(Draft::Draft202012)
         .should_validate_formats(true)
         .build(value)
@@ -828,9 +890,14 @@ fn check_extra(extra: &Mapping, pointer: &str, context: Context, errors: &mut Ve
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Mutex;
+
     use indoc::indoc;
+    use serde_json::json;
 
     use super::*;
+    use crate::document::Document;
+    use crate::violation::Violation;
 
     fn errors(source: &str) -> Vec<SchemaError> {
         compile_schema(source).err().unwrap_or_default()
@@ -1397,6 +1464,165 @@ mod tests {
                 pointer: "/frontmatter".to_string(),
                 message: "external references are not allowed".to_string(),
             }
+        );
+    }
+
+    const META_URI: &str = "https://example.com/meta.json";
+
+    fn frontmatter_document(frontmatter: Value) -> Document {
+        Document {
+            frontmatter,
+            frontmatter_error: None,
+            body_tokens: 0,
+            blocks: vec![],
+            sections: vec![],
+        }
+    }
+
+    fn violations(source: &str, options: &CompileOptions, frontmatter: Value) -> Vec<Violation> {
+        compile_schema_with(source, options)
+            .expect("schema compiles")
+            .validate(&frontmatter_document(frontmatter))
+    }
+
+    fn recording_resolver(
+        answer: Result<Value, String>,
+    ) -> (CompileOptions, Arc<Mutex<Vec<String>>>) {
+        let calls = Arc::new(Mutex::new(Vec::new()));
+        let recorded = Arc::clone(&calls);
+        let options = CompileOptions::new().with_resolver(move |uri: &str| {
+            recorded.lock().unwrap().push(uri.to_string());
+            answer.clone()
+        });
+        (options, calls)
+    }
+
+    #[test]
+    fn registered_external_ref_resolves() {
+        let options = CompileOptions::new().with_schema(
+            META_URI,
+            json!({ "type": "object", "required": ["status"] }),
+        );
+        let source = indoc! {"
+            frontmatter:
+              $ref: https://example.com/meta.json
+        "};
+        assert!(violations(source, &options, json!({})).len() == 1);
+        assert!(violations(source, &options, json!({ "status": "draft" })).is_empty());
+    }
+
+    #[test]
+    fn external_ref_fragment_resolves() {
+        let options = CompileOptions::new().with_schema(
+            META_URI,
+            json!({ "$defs": { "tag": { "type": "string", "minLength": 3 } } }),
+        );
+        let source = indoc! {"
+            frontmatter:
+              type: object
+              properties:
+                tag:
+                  $ref: 'https://example.com/meta.json#/$defs/tag'
+        "};
+        assert_eq!(
+            violations(source, &options, json!({ "tag": "ab" })).len(),
+            1
+        );
+        assert!(violations(source, &options, json!({ "tag": "abc" })).is_empty());
+    }
+
+    #[test]
+    fn external_schema_nested_ref_resolves_relative_to_its_id() {
+        let options = CompileOptions::new()
+            .with_schema(META_URI, json!({ "$id": META_URI, "$ref": "common.json" }))
+            .with_schema(
+                "https://example.com/common.json",
+                json!({ "type": "object", "required": ["status"] }),
+            );
+        let source = indoc! {"
+            frontmatter:
+              $ref: https://example.com/meta.json
+        "};
+        assert_eq!(violations(source, &options, json!({})).len(), 1);
+        assert!(violations(source, &options, json!({ "status": "draft" })).is_empty());
+    }
+
+    #[test]
+    fn resolver_is_called_on_registry_miss() {
+        let (options, calls) =
+            recording_resolver(Ok(json!({ "type": "object", "required": ["status"] })));
+        let source = indoc! {"
+            frontmatter:
+              $ref: https://example.com/meta.json
+        "};
+        assert_eq!(violations(source, &options, json!({})).len(), 1);
+        assert_eq!(*calls.lock().unwrap(), vec![META_URI.to_string()]);
+    }
+
+    #[test]
+    fn registry_hit_does_not_call_resolver() {
+        let (options, calls) = recording_resolver(Err("must not be called".to_string()));
+        let options = options.with_schema(META_URI, json!({ "type": "object" }));
+        let source = indoc! {"
+            frontmatter:
+              $ref: https://example.com/meta.json
+        "};
+        assert!(violations(source, &options, json!({})).is_empty());
+        assert!(calls.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn resolver_failure_becomes_schema_error() {
+        let (options, _) = recording_resolver(Err("network is down".to_string()));
+        let source = indoc! {"
+            frontmatter:
+              $ref: https://example.com/meta.json
+        "};
+        let all = compile_schema_with(source, &options).err().unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!(all[0].pointer, "/frontmatter");
+        assert!(all[0].message.contains(META_URI), "{}", all[0].message);
+        assert!(
+            all[0].message.contains("network is down"),
+            "{}",
+            all[0].message
+        );
+    }
+
+    #[test]
+    fn json_schema_ref_to_registered_document_schema_is_rejected() {
+        let options = CompileOptions::new()
+            .with_schema(META_URI, json!({ "$schema": DIALECT_V1, "sections": [] }));
+        let source = indoc! {"
+            frontmatter:
+              $ref: https://example.com/meta.json
+        "};
+        let all = compile_schema_with(source, &options).err().unwrap();
+        assert_eq!(all[0].pointer, "/frontmatter");
+        assert!(
+            all[0]
+                .message
+                .contains("is a document schema, not a JSON Schema"),
+            "{}",
+            all[0].message
+        );
+    }
+
+    #[test]
+    fn json_schema_ref_to_resolved_document_schema_is_rejected() {
+        let (options, _) = recording_resolver(Ok(json!({ "$schema": DIALECT_V1 })));
+        let source = indoc! {"
+            frontmatter:
+              $ref: https://example.com/meta.json
+        "};
+        let all = compile_schema_with(source, &options).err().unwrap();
+        assert_eq!(all[0].pointer, "/frontmatter");
+        assert!(
+            all[0]
+                .message
+                .contains("is a document schema, not a JSON Schema"),
+            "{}",
+            all[0].message
         );
     }
 }

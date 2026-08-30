@@ -459,6 +459,20 @@ fn agree_on_real_schema_corpus() {
             "},
         ),
         (
+            "references-in-reduced-and-header-positions",
+            indoc! {"
+                $id: https://example.com/note.yaml
+                $defs:
+                  short: { maxTokens: 300 }
+                  summary: { const: Summary }
+                allSections:
+                  $ref: '#/$defs/short'
+                sections:
+                  - header:
+                      $ref: '#/$defs/summary'
+            "},
+        ),
+        (
             "table-and-rule",
             indoc! {"
             blocks:
@@ -571,6 +585,24 @@ fn known_divergences() {
             true,
             false,
             "target: inert/undocumented compiler field the meta-schema deliberately flags",
+        ),
+        (
+            indoc! {"
+                sections:
+                  - $ref: https://example.com/lib.yaml
+            "},
+            false,
+            true,
+            "external document $ref: the referenced schema is supplied at compile time, not expressible here",
+        ),
+        (
+            indoc! {"
+                sections:
+                  - $ref: '#/$defs/missing'
+            "},
+            false,
+            true,
+            "dangling local $ref: pointer resolution is not expressible in JSON Schema",
         ),
     ];
 

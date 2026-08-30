@@ -51,6 +51,26 @@ for markdown in ["# Summary\n\na\n", "# Other\n\nb\n"] {
 }
 ```
 
+External references — the dialect's `$ref` between document schemas, and JSON
+Schema `$ref` inside `frontmatter` — are resolved against schemas supplied up
+front through `CompileOptions`, with an optional resolver consulted only on a
+miss. The crate performs no I/O of its own:
+
+```rust
+use schematter_lib::{validate_with, CompileOptions};
+
+let options = CompileOptions::new()
+    .with_schema(
+        "https://schemas.example.com/shared.yaml",
+        serde_json::json!({ "sections": [{ "header": { "const": "Summary" } }] }),
+    )
+    .with_resolver(|uri: &str| Err(format!("{uri} is not available offline")));
+
+let schema = "sections:\n  - $ref: 'https://schemas.example.com/shared.yaml#/sections/0'\n";
+let violations = validate_with("# Summary\n\ntext\n", schema, &options).unwrap();
+assert!(violations.is_empty());
+```
+
 ## Related crates
 
 | Crate                                                                  | Kind    | Contents                                              |

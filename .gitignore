@@ -1,2 +1,4 @@
 /target
 crates/schematter-wasm/target
+/.iwe
+/private

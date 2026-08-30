@@ -6,6 +6,10 @@ use serde_yaml_ng::Mapping;
 pub struct DocumentSchema {
     #[serde(rename = "$schema")]
     pub dialect: Option<String>,
+    #[serde(rename = "$id")]
+    pub id: Option<String>,
+    #[serde(rename = "$defs")]
+    pub defs: Option<Mapping>,
     pub description: Option<String>,
     pub frontmatter: Option<serde_json::Value>,
     pub max_tokens: Option<usize>,

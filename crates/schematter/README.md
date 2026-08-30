@@ -77,6 +77,25 @@ the binding trace — which section and block bound to which schema entry —
 instead of validating, which is how you debug a schema that matches differently
 than you expect.
 
+## External references
+
+A schema can point at another with `$ref` — a whole file or one node inside it
+— and its `frontmatter` can `$ref` an external JSON Schema. Nothing is fetched
+on its own: name the targets up front, or let the CLI read them from disk.
+
+```bash
+schematter validate NOTE.md --schema note.yaml \
+  --ref https://schemas.example.com/shared.yaml=shared.yaml
+
+schematter validate NOTE.md --schema note.yaml --resolve-refs
+```
+
+`--ref URI=FILE` registers one file under one URI and repeats; `--ref FILE`
+alone takes the URI from the file's own `$id`. `--resolve-refs` reads whatever
+is left from disk, resolved against the schema file's directory — `file:` and
+relative references only; `http`/`https` are refused by scheme. An unresolved
+reference is a schema error, so the command exits `2` rather than validating.
+
 ## The schema language
 
 The full language reference — every keyword, the matching semantics, the block

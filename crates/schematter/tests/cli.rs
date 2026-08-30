@@ -25,15 +25,30 @@ struct Case {
 }
 
 fn case(schema: &str, markdown: &str) -> Case {
+    case_with(schema, markdown, &[])
+}
+
+fn case_with(schema: &str, markdown: &str, extras: &[(&str, &str)]) -> Case {
     let dir = TempDir::new().unwrap();
     let schema_path = dir.path().join("note.yaml");
     let markdown_path = dir.path().join("note.md");
     std::fs::write(&schema_path, schema).unwrap();
     std::fs::write(&markdown_path, markdown).unwrap();
+    for (name, contents) in extras {
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
+    }
     Case {
         _dir: dir,
         schema: schema_path.to_str().unwrap().to_string(),
         markdown: markdown_path.to_str().unwrap().to_string(),
+    }
+}
+
+impl Case {
+    fn path(&self, name: &str) -> String {
+        self._dir.path().join(name).to_str().unwrap().to_string()
     }
 }
 
@@ -304,4 +319,206 @@ fn unparseable_schema_yaml_exits_two_without_pointer() {
     assert_eq!(output.status.code(), Some(2));
     assert_eq!(stdout(&output), "");
     assert!(stderr(&output).starts_with("schema 'note': "));
+}
+
+const META_SCHEMA: &str = indoc! {"
+    type: object
+    required: [status]
+"};
+
+const LIB_SCHEMA: &str = indoc! {"
+    sections:
+      - header: { const: Summary }
+"};
+
+#[test]
+fn registered_frontmatter_ref_is_resolved() {
+    let case = case_with(
+        indoc! {"
+            frontmatter:
+              $ref: https://example.com/meta.json
+        "},
+        indoc! {"
+            # Notes
+        "},
+        &[("meta.json", META_SCHEMA)],
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "--ref",
+        &format!("https://example.com/meta.json={}", case.path("meta.json")),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        stdout(&output),
+        "note \u{203a} frontmatter: \"status\" is a required property\n"
+    );
+}
+
+#[test]
+fn registered_section_ref_is_resolved() {
+    let case = case_with(
+        indoc! {"
+            sections:
+              - $ref: 'https://example.com/lib.yaml#/sections/0'
+            additionalSections: false
+        "},
+        indoc! {"
+            # Summary
+
+            text
+        "},
+        &[("lib.yaml", LIB_SCHEMA)],
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "--ref",
+        &format!("https://example.com/lib.yaml={}", case.path("lib.yaml")),
+    ]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(stdout(&output), "");
+}
+
+#[test]
+fn a_ref_file_may_carry_its_own_id() {
+    let case = case_with(
+        indoc! {"
+            sections:
+              - $ref: 'https://example.com/lib.yaml#/sections/0'
+        "},
+        indoc! {"
+            # Notes
+        "},
+        &[(
+            "lib.yaml",
+            indoc! {"
+                $id: https://example.com/lib.yaml
+                sections:
+                  - header: { const: Summary }
+            "},
+        )],
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "--ref",
+        &case.path("lib.yaml"),
+    ]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        stdout(&output),
+        "note: required section \"Summary\" is missing\n"
+    );
+}
+
+#[test]
+fn resolve_refs_reads_a_relative_reference_from_disk() {
+    let case = case_with(
+        indoc! {"
+            sections:
+              - $ref: ./section.yaml
+            additionalSections: false
+        "},
+        indoc! {"
+            # Summary
+
+            text
+        "},
+        &[("section.yaml", "header: { const: Summary }\n")],
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "--resolve-refs",
+    ]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(stderr(&output), "");
+    assert_eq!(stdout(&output), "");
+}
+
+#[test]
+fn an_external_ref_without_flags_exits_two() {
+    let case = case(
+        indoc! {"
+            frontmatter:
+              $ref: https://example.com/meta.json
+        "},
+        "# Notes\n",
+    );
+    let output = run(&["validate", &case.markdown, "--schema", &case.schema]);
+    assert_eq!(output.status.code(), Some(2));
+    assert_eq!(
+        stderr(&output),
+        "schema 'note' /frontmatter: external references are not allowed\n"
+    );
+}
+
+#[test]
+fn resolve_refs_refuses_network_schemes() {
+    let case = case(
+        indoc! {"
+            sections:
+              - $ref: https://example.com/lib.yaml
+        "},
+        "# Notes\n",
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "--resolve-refs",
+    ]);
+    assert_eq!(output.status.code(), Some(2));
+    assert!(
+        stderr(&output).contains("'https:' references are not read from disk"),
+        "{}",
+        stderr(&output)
+    );
+}
+
+#[test]
+fn resolve_refs_follows_a_chain_across_directories() {
+    let case = case_with(
+        indoc! {"
+            sections:
+              - $ref: lib/section.yaml
+            additionalSections: false
+        "},
+        indoc! {"
+            # Summary
+
+            text
+        "},
+        &[
+            ("lib/section.yaml", "$ref: ./summary.yaml\nmaxTokens: 500\n"),
+            (
+                "lib/summary.yaml",
+                indoc! {"
+                    $schema: https://document-schema.org/draft/2026-06/schema
+                    $id: https://schemas.example.com/summary.yaml
+                    header: { const: Summary }
+                "},
+            ),
+        ],
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "--resolve-refs",
+    ]);
+    assert_eq!(stderr(&output), "");
+    assert_eq!(output.status.code(), Some(0));
 }

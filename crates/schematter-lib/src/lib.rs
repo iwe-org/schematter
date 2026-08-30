@@ -18,6 +18,10 @@
 //! assert!(violations.is_empty());
 //! ```
 //!
+//! External schemas — both document schemas referenced by the dialect's `$ref`
+//! keyword and JSON Schemas referenced from `frontmatter` — are supplied up
+//! front through [`CompileOptions`] and validated with [`validate_with`].
+//!
 //! The pieces are also exposed directly: [`compile_schema`] turns a schema
 //! source into a [`CompiledSchema`] (or a list of [`SchemaError`] load errors),
 //! [`build_document`] projects markdown into the [`Document`] model, and
@@ -32,8 +36,9 @@ pub mod tokens;
 pub use schematter_validator::{compile, dialect, document, violation};
 
 pub use builder::build_document;
-pub use schematter_validator::{compile_schema, CompiledSchema, SchemaError};
+pub use schematter_validator::{compile_schema, compile_schema_with, CompiledSchema, SchemaError};
 pub use schematter_validator::{Block, BlockKind, Document, Item, Section};
+pub use schematter_validator::{CompileOptions, ResolveError, Resolver};
 pub use schematter_validator::{Crumb, Violation};
 
 /// Validate `markdown` against a `schema` source.
@@ -43,7 +48,22 @@ pub use schematter_validator::{Crumb, Violation};
 /// checked as JSON Schema and the body against the structural schema; the two
 /// sets of violations are returned together.
 pub fn validate(markdown: &str, schema: &str) -> Result<Vec<Violation>, Vec<SchemaError>> {
-    let compiled = compile_schema(schema)?;
+    validate_with(markdown, schema, &CompileOptions::default())
+}
+
+/// Validate `markdown` against a `schema` source, resolving external references
+/// through `options`.
+///
+/// Schemas registered on [`CompileOptions`] — and, on a registry miss, its
+/// [`Resolver`] — answer both the document-schema `$ref` keyword and the JSON
+/// Schema `$ref`s inside `frontmatter`. Without either, external references are
+/// rejected as schema errors.
+pub fn validate_with(
+    markdown: &str,
+    schema: &str,
+    options: &CompileOptions,
+) -> Result<Vec<Violation>, Vec<SchemaError>> {
+    let compiled = compile_schema_with(schema, options)?;
     let document = build_document(markdown, tokens::count_tokens);
     Ok(compiled.validate(&document))
 }
