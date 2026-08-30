@@ -299,12 +299,18 @@ The minimum supported Rust version is 1.82.
 
 ## Releases
 
+All three published crates share one workspace version, and each keeps its own
+`CHANGELOG.md` — the bullet goes under `## [Unreleased]` when the change is
+made, not when the release is cut.
+
 CI lives in `.github/workflows/`: `rust.yml` builds and tests every push and
 pull request on Linux, macOS, and Windows; `release-plz.yaml` versions and
 publishes the crates to crates.io on pushes to `main` (requires the
 `RELEASE_PLZ_TOKEN` and `CARGO_REGISTRY_TOKEN` repository secrets);
-`release.yaml` attaches prebuilt `schematter` binaries for six targets to each
-published GitHub release.
+`release.yaml` attaches prebuilt `schematter` binaries for six targets to the
+published GitHub release. `.release-plz.toml` gives that release page to
+`schematter` alone; the two library crates are tagged and published without
+one.
 
 ## License
 

@@ -1,0 +1,23 @@
+[workspace]
+changelog_update = false
+dependencies_update = false
+git_release_enable = false
+
+[[package]]
+name = "schematter"
+git_release_enable = true
+git_release_name = "v{{ version }}"
+git_release_draft = false
+changelog_update = false
+
+[[package]]
+name = "schematter-lib"
+git_release_enable = false
+git_release_draft = false
+changelog_update = false
+
+[[package]]
+name = "schematter-validator"
+git_release_enable = false
+git_release_draft = false
+changelog_update = false
