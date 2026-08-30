@@ -2,3 +2,4 @@
 crates/schematter-wasm/target
 /.iwe
 /private
+.claude
