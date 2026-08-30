@@ -500,16 +500,19 @@ The rules follow JSON Schema 2020-12:
 
 - **Value.** A URI reference. It resolves against the schema's own `$id` when
   it has one, else against the URI the schema was registered or retrieved
-  under, else — in the CLI — against the schema file's own location. A schema
-  that has been loaded is addressable under both: the URI it came from and its
-  own `$id`.
+  under, else — under the CLI's `--resolve-refs` — against the schema file's
+  own directory, which references may not climb above. A schema that has been
+  loaded is addressable under both the URI it came from and its own `$id`.
 - **Fragment.** A JSON Pointer into the referenced document (`#/sections/0`,
   `#/$defs/summary`); an empty fragment means the whole document. `$defs` holds
   named subschemas, which are never applied on their own.
 - **Merging.** The referenced node replaces the referencing one, and the
   referencing node's remaining keywords override what the target carries — the
   `maxTokens: 200` above wins over the shared entry's own budget. A
-  document-level `$ref` merges into the root the same way.
+  document-level `$ref` merges into the root the same way. `$schema`, `$id`,
+  and `$defs` describe the document they are written in and never travel
+  across a reference, so a shared library file may carry all three and still
+  be referenced whole.
 - **Kind.** The target must be a document schema: a `$schema` on it, if
   present, must name this dialect, and a pointer may not descend into a
   `frontmatter` node — that content is JSON Schema, not this dialect. The

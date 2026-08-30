@@ -6,6 +6,8 @@ use serde_yaml_ng::Value;
 use crate::compile::{SchemaError, DIALECT_V1};
 use crate::resolve::Fetcher;
 
+const DOCUMENT_METADATA: &[&str] = &["$schema", "$id", "$defs"];
+
 struct Scope {
     key: String,
     base: Option<String>,
@@ -241,6 +243,12 @@ fn resolve_reference(
     resolve_node(&mut node, &target_scope, pointer, stack, context);
     stack.pop();
 
+    if let Value::Mapping(map) = &mut node {
+        for key in DOCUMENT_METADATA {
+            map.shift_remove(*key);
+        }
+    }
+
     Some(node)
 }
 
@@ -313,7 +321,7 @@ mod tests {
     use indoc::indoc;
     use serde_json::json;
 
-    use crate::compile::{compile_schema, compile_schema_with, SchemaError};
+    use crate::compile::{compile_schema, compile_schema_with, SchemaError, DIALECT_V1};
     use crate::document::{Document, Section};
     use crate::resolve::CompileOptions;
     use crate::violation::Violation;
@@ -406,6 +414,21 @@ mod tests {
         let compiled = compile_schema(source).expect("schema compiles");
         assert!(compiled.validate(&document(&["Summary"])).is_empty());
         assert_eq!(compiled.validate(&document(&["Notes"])).len(), 1);
+    }
+
+    #[test]
+    fn document_metadata_does_not_travel_with_a_reference() {
+        let options = CompileOptions::new().with_schema(
+            LIB_URI,
+            json!({
+                "$schema": DIALECT_V1,
+                "$id": LIB_URI,
+                "$defs": { "spare": { "header": { "const": "Spare" } } },
+                "header": { "const": "Summary" },
+            }),
+        );
+        assert!(violations(SECTION_REF, &options, &["Summary"]).is_empty());
+        assert_eq!(violations(SECTION_REF, &options, &["Notes"]).len(), 1);
     }
 
     #[test]

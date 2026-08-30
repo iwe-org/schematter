@@ -35,7 +35,9 @@ fn case_with(schema: &str, markdown: &str, extras: &[(&str, &str)]) -> Case {
     std::fs::write(&schema_path, schema).unwrap();
     std::fs::write(&markdown_path, markdown).unwrap();
     for (name, contents) in extras {
-        std::fs::write(dir.path().join(name), contents).unwrap();
+        let path = dir.path().join(name);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, contents).unwrap();
     }
     Case {
         _dir: dir,
@@ -483,4 +485,40 @@ fn resolve_refs_refuses_network_schemes() {
         "{}",
         stderr(&output)
     );
+}
+
+#[test]
+fn resolve_refs_follows_a_chain_across_directories() {
+    let case = case_with(
+        indoc! {"
+            sections:
+              - $ref: lib/section.yaml
+            additionalSections: false
+        "},
+        indoc! {"
+            # Summary
+
+            text
+        "},
+        &[
+            ("lib/section.yaml", "$ref: ./summary.yaml\nmaxTokens: 500\n"),
+            (
+                "lib/summary.yaml",
+                indoc! {"
+                    $schema: https://document-schema.org/draft/2026-06/schema
+                    $id: https://schemas.example.com/summary.yaml
+                    header: { const: Summary }
+                "},
+            ),
+        ],
+    );
+    let output = run(&[
+        "validate",
+        &case.markdown,
+        "--schema",
+        &case.schema,
+        "--resolve-refs",
+    ]);
+    assert_eq!(stderr(&output), "");
+    assert_eq!(output.status.code(), Some(0));
 }

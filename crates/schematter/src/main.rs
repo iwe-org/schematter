@@ -48,6 +48,9 @@ enum Command {
     },
 }
 
+const BASE_SCHEME: &str = "schema";
+const BASE_URI: &str = "schema:///";
+
 #[derive(Clone)]
 struct Reference {
     uri: Option<String>,
@@ -175,7 +178,7 @@ fn compile_options(
     refs: &[Reference],
     resolve_refs: bool,
 ) -> Result<CompileOptions> {
-    let mut options = CompileOptions::new().with_base_uri(file_uri(schema));
+    let mut options = CompileOptions::new();
 
     for reference in refs {
         let value = read_schema(&reference.path)?;
@@ -202,7 +205,9 @@ fn compile_options(
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or(Path::new("."))
             .to_path_buf();
-        options = options.with_resolver(move |uri: &str| resolve_from_disk(uri, &directory));
+        options = options
+            .with_base_uri(BASE_URI)
+            .with_resolver(move |uri: &str| resolve_from_disk(uri, &directory));
     }
 
     Ok(options)
@@ -221,7 +226,8 @@ fn parse_schema(source: &str) -> Result<serde_json::Value> {
 
 fn resolve_from_disk(uri: &str, directory: &Path) -> Result<serde_json::Value, String> {
     let path = match scheme(uri) {
-        Some("file") => PathBuf::from(decode(strip_authority(&uri["file:".len()..]))),
+        Some(BASE_SCHEME) => directory.join(decode(uri.strip_prefix(BASE_URI).unwrap_or(uri))),
+        Some("file") => PathBuf::from(local_path(uri)),
         Some(scheme) => {
             return Err(format!(
             "'{scheme}:' references are not read from disk; only file and relative references are"
@@ -268,21 +274,12 @@ fn decode(encoded: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
-fn file_uri(path: &Path) -> String {
-    let absolute = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
-    let mut uri = String::from("file://");
-    for char in absolute.to_string_lossy().chars() {
-        match char {
-            'A'..='Z' | 'a'..='z' | '0'..='9' | '-' | '.' | '_' | '~' | '/' => uri.push(char),
-            _ => {
-                let mut buffer = [0u8; 4];
-                for byte in char.encode_utf8(&mut buffer).bytes() {
-                    uri.push_str(&format!("%{byte:02X}"));
-                }
-            }
-        }
+fn local_path(uri: &str) -> String {
+    let path = decode(strip_authority(&uri["file:".len()..]));
+    match path.as_bytes() {
+        [b'/', drive, b':', ..] if drive.is_ascii_alphabetic() => path[1..].to_string(),
+        _ => path,
     }
-    uri
 }
 
 fn read_inputs(paths: &[PathBuf]) -> Result<Vec<(String, String)>> {
@@ -346,4 +343,31 @@ fn print_json(schema_name: &str, reports: &[Report]) -> Result<()> {
         .collect();
     println!("{}", serde_json::to_string_pretty(&reports)?);
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn scheme_is_read_only_from_a_valid_prefix() {
+        assert_eq!(scheme("https://example.com/x.yaml"), Some("https"));
+        assert_eq!(scheme("schema:///lib/x.yaml"), Some("schema"));
+        assert_eq!(scheme("./x.yaml"), None);
+        assert_eq!(scheme("lib/x.yaml"), None);
+        assert_eq!(scheme("9lives:/x"), None);
+    }
+
+    #[test]
+    fn file_uris_become_local_paths() {
+        assert_eq!(
+            local_path("file:///tmp/schemas/x.yaml"),
+            "/tmp/schemas/x.yaml"
+        );
+        assert_eq!(local_path("file:///D:/schemas/x.yaml"), "D:/schemas/x.yaml");
+        assert_eq!(
+            local_path("file:///tmp/my%20schemas/x.yaml"),
+            "/tmp/my schemas/x.yaml"
+        );
+    }
 }
